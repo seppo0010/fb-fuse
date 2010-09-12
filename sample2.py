@@ -56,20 +56,23 @@ class MyFS(fuse.Fuse):
 		return 0
 
 	def release(self, path, flags):
-		tmp = self.tempfiles[path];
-		tmp.seek(0, os.SEEK_SET);
-		file = tmp.read();
-		m = Multipart()
-		m.field('access_token',self.access_token)
-		m.file('source','image',file,{'Content-Type':'image/jpeg'})
-		ct,body = m.get()
+		if path.startswith('/photos/'):
+			if len(self.albums) == 0:
+				self.fetch_albums();
+			tmp = self.tempfiles[path];
+			tmp.seek(0, os.SEEK_SET);
+			file = tmp.read();
+			m = Multipart()
+			m.field('access_token',self.access_token)
+			m.file('source','image',file,{'Content-Type':'image/jpeg'})
+			ct,body = m.get()
 
-		request = urllib2.Request('https://graph.facebook.com/' + self.albums[path[8:path.find('/', 8)]]['id'] + '/photos',body,{'Content-Type':ct});
-		reply = urllib2.urlopen(request)
-		tempfile = tmp.name;
-		tmp.close();
-		del self.tempfiles[path]
-		os.unlink = tempfile;
+			request = urllib2.Request('https://graph.facebook.com/' + self.albums[path[8:path.find('/', 8)]]['id'] + '/photos',body,{'Content-Type':ct});
+			reply = urllib2.urlopen(request)
+			tempfile = tmp.name;
+			tmp.close();
+			del self.tempfiles[path]
+			os.unlink = tempfile;
 
 	def write(self, path, buf, offset):
 		tmp = None;
@@ -99,39 +102,46 @@ class MyFS(fuse.Fuse):
 	def fsync(self, path, isfsyncfile):
 		return 0
 
+	def fetch_albums(self):
+		self.albums.clear();
+		conn = httplib.HTTPSConnection('graph.facebook.com');
+		conn.connect()
+		conn.request('GET', '/me/albums?access_token=' + self.access_token)
+		response = conn.getresponse();
+		decoder = json.JSONDecoder('latin_1');
+		info = decoder.decode(response.read());
+		listdata = info.get('data', [])
+		for item in listdata:
+			name = str(item.get('name', '').encode('utf8'));
+			self.albums[name] = item;
+
 	def readdir(self, path, offset):
 		for e in '.', '..':
 			yield fuse.Direntry(e);
 		if path == '/':
 			yield fuse.Direntry('photos');
 		elif path == '/photos':
-			self.albums.clear();
-			conn = httplib.HTTPSConnection('graph.facebook.com');
-			conn.connect()
-			conn.request('GET', '/me/albums?access_token=' + self.access_token)
-			response = conn.getresponse();
-			decoder = json.JSONDecoder('latin_1');
-			info = decoder.decode(response.read());
-			listdata = info.get('data', [])
-			for item in listdata:
-				name = str(item.get('name', '').encode('utf8'));
-				yield fuse.Direntry(name);
-				self.albums[name] = item;
-
+			self.fetch_albums();
+			for item in self.albums.iterkeys():
+				yield fuse.Direntry(item);
 		elif path.startswith('/photos') and path.count('/') == 2:
 			if len(self.albums) == 0:
-				self.readdir('/photos',0);
+				self.fetch_albums();
 
 			conn = httplib.HTTPSConnection('graph.facebook.com');
-			conn.connect()
-			conn.request('GET', '/' +self.albums[path[8:]]['id']+ '/photos?access_token=' + self.access_token);
-			response = conn.getresponse();
-			decoder = json.JSONDecoder('latin_1');
-			info = decoder.decode(response.read());
-			listdata = info.get('data', [])
-			for item in listdata:
-				name = str(item.get('id', '').encode('utf8'));
-				yield fuse.Direntry(name);
+			try:
+				conn.connect()
+				conn.request('GET', '/' +self.albums[path[8:]]['id']+ '/photos?access_token=' + self.access_token);
+				response = conn.getresponse();
+				decoder = json.JSONDecoder('latin_1');
+				info = decoder.decode(response.read());
+				listdata = info.get('data', [])
+				for item in listdata:
+					name = str(item.get('id', '').encode('utf8'));
+					yield fuse.Direntry(name);
+			except KeyError:
+				print 'File not found';
+			conn.close()
 
 if __name__ == '__main__':
 	fs = MyFS()
