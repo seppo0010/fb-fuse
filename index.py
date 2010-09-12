@@ -38,12 +38,15 @@ class MyFS(fuse.Fuse):
 			sys.exit('No access token set');
 
 	def get_photo_from_path(self, path):
+		try:
 			album_name = path[8:path.find('/', 8)];
 			album_id = self.albums[album_name]['id'];
 			pos = (8 + 1 + len(album_name))
 			photo_id = path[pos:]
 			photo = self.photos[album_id][photo_id];
 			return photo
+		except KeyError:
+			return None
 
 	def getattr(self, path):
 		st = fuse.Stat()
@@ -54,6 +57,9 @@ class MyFS(fuse.Fuse):
 			st.st_mode = stat.S_IFREG | 0755
 			st.st_nlink = 1
 			photo = self.get_photo_from_path(path)
+			if photo is None:
+				return -errno.ENOENT
+
 			url = urlparse(photo['source']);
 			conn = httplib.HTTPConnection(url.netloc)
 			conn.request("HEAD", url.path)
@@ -67,13 +73,16 @@ class MyFS(fuse.Fuse):
 		return st
 
 	def mknod(self, path, mode, dev):
-		return -EINVAL
+		return 0
 
 	def open(self, path, flags):
 		return 0
 
 	def read(self, path, size, offset):
 		photo = self.get_photo_from_path(path)
+		if photo is None:
+			return "";
+
 		url = urlparse(photo['source']);
 		conn = httplib.HTTPConnection(url.netloc)
 		conn.connect()
