@@ -1,0 +1,3 @@
+https://www.facebook.com/login.php?api_key=5102931167&cancel_url=http://localhost.localdomain/&display=page&fbconnect=1&next=http://localhost.localdomain/&return_session=1&session_version=3&v=1.0
+https://graph.facebook.com/oauth/authorize?client_id=5102931167&redirect_uri=http://localhost.localdomain/&scope=user_photos,offline_access
+https://graph.facebook.com/oauth/access_token?client_id=5102931167&redirect_uri=http://localhost.localdomain/&client_secret=e18111c0477205bca82f9320a4139199&code=2.bmxapAr5hOU0AtBLaCibYg__.3600.1284292800-775204198|FdVI4x0sz-7UDEFSjak5jAU_uXs
