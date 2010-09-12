@@ -202,4 +202,5 @@ class MyFS(fuse.Fuse):
 if __name__ == '__main__':
 	fs = MyFS()
 	fs.parse(errex=1)
+	fs.multithreaded = False
 	fs.main()
