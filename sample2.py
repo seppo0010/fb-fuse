@@ -12,6 +12,7 @@ import ConfigParser
 import tempfile
 import urllib2
 from multipart import Multipart
+from urlparse import urlparse
 
 fuse.fuse_python_api = (0, 2)
 
@@ -36,6 +37,14 @@ class MyFS(fuse.Fuse):
 		except ConfigParser.Error:
 			sys.exit('No access token set');
 
+	def get_photo_from_path(self, path):
+			album_name = path[8:path.find('/', 8)];
+			album_id = self.albums[album_name]['id'];
+			pos = (8 + 1 + len(album_name))
+			photo_id = path[pos:]
+			photo = self.photos[album_id][photo_id];
+			return photo
+
 	def getattr(self, path):
 		st = fuse.Stat()
 		if path == '/' or path == '/photos' or (path.startswith('/photos') and path.count('/') == 2):
@@ -44,6 +53,13 @@ class MyFS(fuse.Fuse):
 		else:
 			st.st_mode = stat.S_IFREG | 0755
 			st.st_nlink = 1
+			photo = self.get_photo_from_path(path)
+			url = urlparse(photo['source']);
+			conn = httplib.HTTPConnection(url.netloc)
+			conn.request("HEAD", url.path)
+			response = conn.getresponse();
+			st.st_size = int(response.getheader('content-length'))
+
 		st.st_atime = int(time.time())
 		st.st_mtime = st.st_atime
 		st.st_ctime = st.st_atime
@@ -56,24 +72,41 @@ class MyFS(fuse.Fuse):
 	def open(self, path, flags):
 		return 0
 
+	def read(self, path, size, offset):
+		photo = self.get_photo_from_path(path)
+		url = urlparse(photo['source']);
+		conn = httplib.HTTPConnection(url.netloc)
+		conn.connect()
+		conn.request("GET", url.path, None, {'Range': str(offset) + '-' + str(offset+size)})
+		response = conn.getresponse();
+		if response.status == 206:
+			return response.read()
+		else:
+			if offset > 0:
+				response.read(offset);
+			return response.read(size);
+
 	def release(self, path, flags):
 		if path.startswith('/photos/'):
 			if len(self.albums) == 0:
 				self.fetch_albums();
-			tmp = self.tempfiles[path];
-			tmp.seek(0, os.SEEK_SET);
-			file = tmp.read();
-			m = Multipart()
-			m.field('access_token',self.access_token)
-			m.file('source','image',file,{'Content-Type':'image/jpeg'})
-			ct,body = m.get()
+			try:
+				tmp = self.tempfiles[path];
+				tmp.seek(0, os.SEEK_SET);
+				file = tmp.read();
+				m = Multipart()
+				m.field('access_token',self.access_token)
+				m.file('source','image',file,{'Content-Type':'image/jpeg'})
+				ct,body = m.get()
 
-			request = urllib2.Request('https://graph.facebook.com/' + self.albums[path[8:path.find('/', 8)]]['id'] + '/photos',body,{'Content-Type':ct});
-			reply = urllib2.urlopen(request)
-			tempfile = tmp.name;
-			tmp.close();
-			del self.tempfiles[path]
-			os.unlink = tempfile;
+				request = urllib2.Request('https://graph.facebook.com/' + self.albums[path[8:path.find('/', 8)]]['id'] + '/photos',body,{'Content-Type':ct});
+				reply = urllib2.urlopen(request)
+				tempfile = tmp.name;
+				tmp.close();
+				del self.tempfiles[path]
+				os.unlink = tempfile;
+			except KeyError:
+				return
 
 	def write(self, path, buf, offset):
 		tmp = None;
@@ -115,6 +148,7 @@ class MyFS(fuse.Fuse):
 		for item in listdata:
 			name = str(item.get('name', '').encode('utf8'));
 			self.albums[name] = item;
+		conn.close()
 
 	def fetch_photos_from_album(self, album_id):
 		conn = httplib.HTTPSConnection('graph.facebook.com');
@@ -123,7 +157,11 @@ class MyFS(fuse.Fuse):
 		response = conn.getresponse();
 		decoder = json.JSONDecoder('latin_1');
 		info = decoder.decode(response.read());
-		self.photos[album_id] = info.get('data', [])
+		listdata = info.get('data', [])
+		self.photos[album_id] = {};
+		for item in listdata:
+			name = str(item.get('id', '').encode('utf8'));
+			self.photos[album_id][name] = item;
 		conn.close()
 
 	def readdir(self, path, offset):
@@ -142,9 +180,8 @@ class MyFS(fuse.Fuse):
 
 				album_id = self.albums[path[8:]]['id']
 				self.fetch_photos_from_album(album_id);
-				for item in self.photos[album_id]:
-					name = str(item.get('id', '').encode('utf8'));
-					yield fuse.Direntry(name);
+				for item in self.photos[album_id].iterkeys():
+					yield fuse.Direntry(item);
 		except KeyError:
 			print 'File not found';
 
