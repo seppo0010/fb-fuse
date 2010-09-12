@@ -21,6 +21,7 @@ class MyFS(fuse.Fuse):
 	photos = {}
 	access_token = None;
 	tempfiles = {};
+	tempnodes = [];
 
 	def __init__(self, *args, **kw):
 		fuse.Fuse.__init__(self, *args, **kw)
@@ -50,7 +51,10 @@ class MyFS(fuse.Fuse):
 
 	def getattr(self, path):
 		st = fuse.Stat()
-		if path == '/' or path == '/photos' or (path.startswith('/photos') and path.count('/') == 2):
+		if self.tempnodes.count(path) > 0:
+			st.st_mode = stat.S_IFREG | 0755
+			st.st_nlink = 1
+		elif path == '/' or path == '/photos' or (path.startswith('/photos') and path.count('/') == 2):
 			st.st_mode = stat.S_IFDIR | 0755
 			st.st_nlink = 2
 		else:
@@ -73,6 +77,7 @@ class MyFS(fuse.Fuse):
 		return st
 
 	def mknod(self, path, mode, dev):
+		self.tempnodes.append(path);
 		return 0
 
 	def open(self, path, flags):
