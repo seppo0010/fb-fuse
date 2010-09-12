@@ -17,6 +17,7 @@ fuse.fuse_python_api = (0, 2)
 
 class MyFS(fuse.Fuse):
 	albums = {};
+	photos = {}
 	access_token = None;
 	tempfiles = {};
 
@@ -115,33 +116,37 @@ class MyFS(fuse.Fuse):
 			name = str(item.get('name', '').encode('utf8'));
 			self.albums[name] = item;
 
-	def readdir(self, path, offset):
-		for e in '.', '..':
-			yield fuse.Direntry(e);
-		if path == '/':
-			yield fuse.Direntry('photos');
-		elif path == '/photos':
-			self.fetch_albums();
-			for item in self.albums.iterkeys():
-				yield fuse.Direntry(item);
-		elif path.startswith('/photos') and path.count('/') == 2:
-			if len(self.albums) == 0:
-				self.fetch_albums();
+	def fetch_photos_from_album(self, album_id):
+		conn = httplib.HTTPSConnection('graph.facebook.com');
+		conn.connect()
+		conn.request('GET', '/' +album_id+ '/photos?access_token=' + self.access_token);
+		response = conn.getresponse();
+		decoder = json.JSONDecoder('latin_1');
+		info = decoder.decode(response.read());
+		self.photos[album_id] = info.get('data', [])
+		conn.close()
 
-			conn = httplib.HTTPSConnection('graph.facebook.com');
-			try:
-				conn.connect()
-				conn.request('GET', '/' +self.albums[path[8:]]['id']+ '/photos?access_token=' + self.access_token);
-				response = conn.getresponse();
-				decoder = json.JSONDecoder('latin_1');
-				info = decoder.decode(response.read());
-				listdata = info.get('data', [])
-				for item in listdata:
+	def readdir(self, path, offset):
+		try:
+			for e in '.', '..':
+				yield fuse.Direntry(e);
+			if path == '/':
+				yield fuse.Direntry('photos');
+			elif path == '/photos':
+				self.fetch_albums();
+				for item in self.albums.iterkeys():
+					yield fuse.Direntry(item);
+			elif path.startswith('/photos') and path.count('/') == 2:
+				if len(self.albums) == 0:
+					self.fetch_albums();
+
+				album_id = self.albums[path[8:]]['id']
+				self.fetch_photos_from_album(album_id);
+				for item in self.photos[album_id]:
 					name = str(item.get('id', '').encode('utf8'));
 					yield fuse.Direntry(name);
-			except KeyError:
-				print 'File not found';
-			conn.close()
+		except KeyError:
+			print 'File not found';
 
 if __name__ == '__main__':
 	fs = MyFS()
