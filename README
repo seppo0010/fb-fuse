@@ -1,3 +1,3 @@
 To start you will need an access token. Execute the three URLs on "permissions" file. Notice the last one will provide an access_token. Replace it on your .fbfuserc file, and move it to your home folder.
 To mount your virtual folder you have to run "./index.py <mountpoint>".
-Of course it requires Python (tested on 2.6) and python-fuse
+Of course it requires Python (tested on 2.6), python-fuse and pycurl
