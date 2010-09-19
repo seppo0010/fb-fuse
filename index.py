@@ -156,6 +156,8 @@ class MyFS(fuse.Fuse):
 		return 0
 
 	def fetch_albums(self):
+		if len(self.albums) > 0:
+			return;
 		self.albums.clear();
 		conn = httplib.HTTPSConnection('graph.facebook.com');
 		conn.connect()
