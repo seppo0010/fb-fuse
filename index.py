@@ -10,6 +10,7 @@ import os
 import sys
 import ConfigParser
 import tempfile
+import urllib
 import urllib2
 import pycurl
 from urlparse import urlparse
@@ -62,8 +63,17 @@ class MyFS(fuse.Fuse):
 			st.st_mode = stat.S_IFREG | 0755
 			st.st_nlink = 1
 		elif path == '/' or path == '/photos' or (path.startswith('/photos') and path.count('/') == 2):
-			st.st_mode = stat.S_IFDIR | 0755
-			st.st_nlink = 2
+			if (path.startswith('/photos') and path.count('/') == 2):
+				album = path[8:]
+				self.fetch_albums();
+				if self.albums.has_key(album):
+					st.st_mode = stat.S_IFDIR | 0755
+					st.st_nlink = 2
+				else:
+					return -errno.ENOENT
+			else:
+				st.st_mode = stat.S_IFDIR | 0755
+				st.st_nlink = 2
 		else:
 			st.st_mode = stat.S_IFREG | 0755
 			st.st_nlink = 1
@@ -144,6 +154,17 @@ class MyFS(fuse.Fuse):
 		return 0
 
 	def mkdir(self, path, mode):
+		if path.startswith('/photos/') and path.count('/') == 2:
+			album = path[8:]
+			conn = httplib.HTTPSConnection('graph.facebook.com');
+			conn.connect()
+			conn.request('POST', '/me/albums', urllib.urlencode({'access_token': str(self.access_token), 'name': str(album)}));
+			response = conn.getresponse();
+			decoder = json.JSONDecoder('latin_1');
+			info = decoder.decode(response.read());
+			albumid = info.get('id', None);
+			if albumid != None:
+				self.albums[album] = {'id': albumid, 'name': album, 'description': ''}
 		return 0
 
 	def rmdir(self, path):
