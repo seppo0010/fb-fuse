@@ -13,6 +13,7 @@ import tempfile
 import urllib
 import urllib2
 import pycurl
+from datetime import datetime
 from urlparse import urlparse
 
 fuse.fuse_python_api = (0, 2)
@@ -59,6 +60,8 @@ class MyFS(fuse.Fuse):
 
 	def getattr(self, path):
 		st = fuse.Stat()
+		st.st_mtime = st.st_atime
+		st.st_ctime = st.st_atime
 		if self.tempnodes.count(path) > 0:
 			st.st_mode = stat.S_IFREG | 0755
 			st.st_nlink = 1
@@ -67,8 +70,11 @@ class MyFS(fuse.Fuse):
 				album = path[8:]
 				self.fetch_albums();
 				if self.albums.has_key(album):
+					thealbum = self.albums[album];
 					st.st_mode = stat.S_IFDIR | 0755
 					st.st_nlink = 2
+					st.st_mtime = time.mktime(thealbum['updated_time'].timetuple());
+					st.st_ctime = time.mktime(thealbum['created_time'].timetuple());
 				else:
 					return -errno.ENOENT
 			else:
@@ -86,10 +92,10 @@ class MyFS(fuse.Fuse):
 			conn.request("HEAD", url.path)
 			response = conn.getresponse();
 			st.st_size = int(response.getheader('content-length'))
+			st.st_mtime = time.mktime(photo['updated_time'].timetuple());
+			st.st_ctime = time.mktime(photo['created_time'].timetuple());
 
 		st.st_atime = int(time.time())
-		st.st_mtime = st.st_atime
-		st.st_ctime = st.st_atime
 
 		return st
 
@@ -164,7 +170,13 @@ class MyFS(fuse.Fuse):
 			info = decoder.decode(response.read());
 			albumid = info.get('id', None);
 			if albumid != None:
-				self.albums[album] = {'id': albumid, 'name': album, 'description': ''}
+				self.albums[album] = {
+					'id': albumid,
+					'name': album,
+#					'description': '', # useless?
+					'created_time': datetime.now(),
+					'updated_time': datetime.now()
+				}
 		return 0
 
 	def rmdir(self, path):
@@ -189,8 +201,17 @@ class MyFS(fuse.Fuse):
 		listdata = info.get('data', [])
 		for item in listdata:
 			name = str(item.get('name', '').encode('utf8'));
-			self.albums[name] = item;
+			self.albums[name] = {
+				'id': item['id'],
+				'name': item['name'],
+#				'description': item.description, # useless?
+				'created_time': self.parse_date(item['created_time']),
+				'updated_time': self.parse_date(item['updated_time'])
+			};
 		conn.close()
+
+	def parse_date(self, date):
+		return datetime.strptime(date, '%Y-%m-%dT%H:%M:%S+0000'); #FIXME: relies on +0000 timezone - python doesn't seem to offer something cool here
 
 	def fetch_photos_from_album(self, album_id):
 		conn = httplib.HTTPSConnection('graph.facebook.com');
@@ -203,7 +224,14 @@ class MyFS(fuse.Fuse):
 		self.photos[album_id] = {};
 		for item in listdata:
 			name = str(item.get('id', '').encode('utf8'));
-			self.photos[album_id][name] = item;
+			self.photos[album_id][name] = {
+				'id': 'name',
+				'picture': item['picture'],
+				'source': item['source'],
+#				'name': item.name, # useless?
+				'created_time': self.parse_date(item['created_time']),
+				'updated_time': self.parse_date(item['updated_time'])
+			}
 		conn.close()
 
 	def readdir(self, path, offset):
