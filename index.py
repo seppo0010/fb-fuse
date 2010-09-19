@@ -11,7 +11,7 @@ import sys
 import ConfigParser
 import tempfile
 import urllib2
-from multipart import Multipart
+import pycurl
 from urlparse import urlparse
 
 fuse.fuse_python_api = (0, 2)
@@ -20,6 +20,7 @@ class MyFS(fuse.Fuse):
 	albums = {};
 	photos = {}
 	access_token = None;
+	max_upload_speed = 0;
 	tempfiles = {};
 	tempnodes = [];
 
@@ -29,9 +30,15 @@ class MyFS(fuse.Fuse):
 		if home == None:
 			sys.exit('No access token set');
 
+		config = ConfigParser.ConfigParser()
+		config.read([home + '/.fbfuserc'])
+
 		try:
-			config = ConfigParser.ConfigParser()
-			config.read([home + '/.fbfuserc'])
+			self.max_upload_speed = int(config.get('connection', 'max_upload_speed'));
+		except ConfigParser.Error:
+			pass
+
+		try:
 			self.access_token = config.get('facebook', 'access_token');
 			if self.access_token == None:
 				sys.exit('No access token set');
@@ -106,19 +113,17 @@ class MyFS(fuse.Fuse):
 				self.fetch_albums();
 			try:
 				tmp = self.tempfiles[path];
-				tmp.seek(0, os.SEEK_SET);
-				file = tmp.read();
-				m = Multipart()
-				m.field('access_token',self.access_token)
-				m.file('source','image',file,{'Content-Type':'image/jpeg'})
-				ct,body = m.get()
-
-				request = urllib2.Request('https://graph.facebook.com/' + self.albums[path[8:path.find('/', 8)]]['id'] + '/photos',body,{'Content-Type':ct});
-				reply = urllib2.urlopen(request)
-				tempfile = tmp.name;
-				tmp.close();
+				c = pycurl.Curl()
+				c.setopt(pycurl.POST, 1)
+				url = "https://graph.facebook.com/" + self.albums[path[8:path.find('/', 8)]]['id'] + "/photos";
+				c.setopt(pycurl.URL, str(url));
+				c.setopt(pycurl.HTTPPOST, [('access_token', self.access_token), ("image", (c.FORM_FILE, tmp.name))]);
+				c.setopt(pycurl.MAX_SEND_SPEED_LARGE, self.max_upload_speed);
+				c.perform()
+				c.close()
 				del self.tempfiles[path]
 				os.unlink = tempfile;
+
 			except KeyError:
 				return
 
